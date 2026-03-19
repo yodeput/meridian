@@ -151,11 +151,13 @@ HARD CLOSE RULES — apply in order, first match wins:
 5. oor_minutes >= ${config.management.outOfRangeWaitMinutes} → CLOSE (OOR timeout)
 6. fee_active_tvl_ratio < ${config.screening.minFeeActiveTvlRatio} AND volume < $${config.screening.minVolume} → CLOSE (yield dead)
 
+CLAIM RULE: If unclaimed_fee_usd >= ${config.management.minClaimAmount}, call claim_fees. Do not use any other threshold.
+
 INSTRUCTIONS:
 All data is pre-loaded above — do NOT call get_my_positions or get_position_pnl.
 Apply the rules to each position and write your report immediately.
-Only call tools if a position needs to be CLOSED (close_position, then swap_token).
-If all positions STAY, just write the report with no tool calls.
+Only call tools if a position needs to be CLOSED or fees need to be CLAIMED.
+If all positions STAY and no fees to claim, just write the report with no tool calls.
 
 REPORT FORMAT (one per position):
 **[PAIR]** | Age: [X]m | Fees: $[X] | PnL: [X]%
