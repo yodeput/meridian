@@ -1,9 +1,12 @@
 import fs from "fs";
-import { log } from "./logger.js";
-import { getPerformanceSummary } from "./lessons.js";
+import path from "path";
+import { fileURLToPath } from "url";
+import { log } from "../core/logger.js";
+import { getPerformanceSummary } from "../core/lessons.js";
 
-const STATE_FILE = "./state.json";
-const LESSONS_FILE = "./lessons.json";
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const STATE_FILE = path.join(__dirname, "..", "data", "state.json");
+const LESSONS_FILE = path.join(__dirname, "..", "data", "lessons.json");
 
 export async function generateBriefing() {
   const state = loadJson(STATE_FILE) || { positions: {}, recentEvents: [] };

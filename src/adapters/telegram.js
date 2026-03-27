@@ -1,15 +1,16 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { log } from "./logger.js";
+import { log } from "../core/logger.js";
+import { config } from "../core/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
+const USER_CONFIG_PATH = path.join(__dirname, "..", "..", "user-config.json");
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN || null;
+const TOKEN = config.credentials.telegramBotToken || null;
 const BASE  = TOKEN ? `https://api.telegram.org/bot${TOKEN}` : null;
 
-let chatId   = process.env.TELEGRAM_CHAT_ID || null;
+let chatId   = config.credentials.telegramChatId || null;
 let _offset  = 0;
 let _polling = false;
 
@@ -18,7 +19,7 @@ function loadChatId() {
   try {
     if (fs.existsSync(USER_CONFIG_PATH)) {
       const cfg = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
-      if (cfg.telegramChatId) chatId = cfg.telegramChatId;
+      if (cfg.credentials?.telegramChatId) chatId = cfg.credentials.telegramChatId;
     }
   } catch { /**/ }
 }
@@ -28,7 +29,8 @@ function saveChatId(id) {
     let cfg = fs.existsSync(USER_CONFIG_PATH)
       ? JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"))
       : {};
-    cfg.telegramChatId = id;
+    cfg.credentials = cfg.credentials || {};
+    cfg.credentials.telegramChatId = id;
     fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(cfg, null, 2));
   } catch (e) {
     log("telegram_error", `Failed to persist chatId: ${e.message}`);

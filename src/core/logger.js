@@ -1,8 +1,9 @@
 import fs from "fs";
 import path from "path";
+import { config } from "./config.js";
 
 const LOG_DIR = "./logs";
-const LOG_LEVEL = process.env.LOG_LEVEL || "info";
+const LOG_LEVEL = config.runtime.logLevel || "info";
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 const currentLevel = LEVELS[LOG_LEVEL] || 1;

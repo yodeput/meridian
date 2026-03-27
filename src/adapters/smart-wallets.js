@@ -1,10 +1,10 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { log } from "./logger.js";
+import { log } from "../core/logger.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WALLETS_PATH = path.join(__dirname, "smart-wallets.json");
+const WALLETS_PATH = path.join(__dirname, "..", "data", "smart-wallets.json");
 
 function loadWallets() {
   if (!fs.existsSync(WALLETS_PATH)) return { wallets: [] };
@@ -69,7 +69,7 @@ export async function checkSmartWalletsOnPool({ pool_address }) {
     };
   }
 
-  const { getWalletPositions } = await import("./tools/dlmm.js");
+  const { getWalletPositions } = await import("../agent/tools/dlmm.js");
 
   const results = await Promise.all(
     wallets.map(async (wallet) => {

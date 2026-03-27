@@ -3,8 +3,10 @@
  * Used by the /learn command — not called on every cycle.
  */
 
+import { config } from "../core/config.js";
+
 const LPAGENT_API = "https://api.lpagent.io/open-api/v1";
-const LPAGENT_KEYS = (process.env.LPAGENT_API_KEY || "").split(",").map(k => k.trim()).filter(Boolean);
+const LPAGENT_KEYS = (config.credentials.lpAgentApiKey || "").split(",").map(k => k.trim()).filter(Boolean);
 let _keyIndex = 0;
 function nextKey() {
   if (!LPAGENT_KEYS.length) return null;

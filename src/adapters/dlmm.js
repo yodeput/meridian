@@ -6,8 +6,8 @@ import {
 } from "@solana/web3.js";
 import BN from "bn.js";
 import bs58 from "bs58";
-import { config } from "../config.js";
-import { log } from "../logger.js";
+import { config } from "../core/config.js";
+import { log } from "../core/logger.js";
 import {
   trackPosition,
   markOutOfRange,
@@ -17,8 +17,8 @@ import {
   getTrackedPosition,
   minutesOutOfRange,
   syncOpenPositions,
-} from "../state.js";
-import { recordPerformance } from "../lessons.js";
+} from "../core/state.js";
+import { recordPerformance } from "../core/lessons.js";
 import { normalizeMint } from "./wallet.js";
 
 // ─── Lazy SDK loader ───────────────────────────────────────────
@@ -45,17 +45,17 @@ let _wallet = null;
 
 function getConnection() {
   if (!_connection) {
-    _connection = new Connection(process.env.RPC_URL, "confirmed");
+    _connection = new Connection(config.credentials.rpcUrl, "confirmed");
   }
   return _connection;
 }
 
 function getWallet() {
   if (!_wallet) {
-    if (!process.env.WALLET_PRIVATE_KEY) {
-      throw new Error("WALLET_PRIVATE_KEY not set");
+    if (!config.credentials.walletKey) {
+      throw new Error("walletKey not set in user-config.json");
     }
-    _wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
+    _wallet = Keypair.fromSecretKey(bs58.decode(config.credentials.walletKey));
     log("init", `Wallet: ${_wallet.publicKey.toString()}`);
   }
   return _wallet;
@@ -109,12 +109,12 @@ export async function deployPosition({
   initial_value_usd,
 }) {
   pool_address = normalizeMint(pool_address);
-  const activeStrategy = strategy || config.strategy.strategy;
+  const activeStrategy = strategy || config.management.strategy;
 
-  const activeBinsBelow = bins_below ?? config.strategy.binsBelow;
+  const activeBinsBelow = bins_below ?? config.management.binsBelow;
   const activeBinsAbove = bins_above ?? 0;
 
-  if (process.env.DRY_RUN === "true") {
+  if (config.runtime.dryRun) {
     const totalBins = activeBinsBelow + activeBinsAbove;
     return {
       dry_run: true,
@@ -528,7 +528,7 @@ export async function searchPools({ query, limit = 10 }) {
 // ─── Claim Fees ────────────────────────────────────────────────
 export async function claimFees({ position_address }) {
   position_address = normalizeMint(position_address);
-  if (process.env.DRY_RUN === "true") {
+  if (config.runtime.dryRun) {
     return { dry_run: true, would_claim: position_address, message: "DRY RUN — no transaction sent" };
   }
 
@@ -569,7 +569,7 @@ export async function claimFees({ position_address }) {
 // ─── Close Position ────────────────────────────────────────────
 export async function closePosition({ position_address }) {
   position_address = normalizeMint(position_address);
-  if (process.env.DRY_RUN === "true") {
+  if (config.runtime.dryRun) {
     return { dry_run: true, would_close: position_address, message: "DRY RUN — no transaction sent" };
   }
 
@@ -714,7 +714,7 @@ export async function withdrawLiquidity({
   position_address = normalizeMint(position_address);
   if (pool_address) pool_address = normalizeMint(pool_address);
 
-  if (process.env.DRY_RUN === "true") {
+  if (config.runtime.dryRun) {
     return {
       dry_run: true,
       would_withdraw: { position_address, pool_address, bps, claim_fees },
@@ -801,7 +801,7 @@ export async function addLiquidity({
   position_address = normalizeMint(position_address);
   if (pool_address) pool_address = normalizeMint(pool_address);
 
-  if (process.env.DRY_RUN === "true") {
+  if (config.runtime.dryRun) {
     return {
       dry_run: true,
       would_add: { position_address, pool_address, amount_x, amount_y, strategy },

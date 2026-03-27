@@ -1,32 +1,20 @@
-import OpenAI from "openai";
 import { buildSystemPrompt } from "./prompt.js";
 import { executeTool } from "./tools/executor.js";
 import { tools } from "./tools/definitions.js";
-
-const MANAGER_TOOLS  = new Set(["close_position", "claim_fees", "swap_token", "update_config", "get_position_pnl", "get_my_positions", "set_position_note", "add_pool_note", "get_wallet_balance", "withdraw_liquidity", "add_liquidity", "list_strategies", "get_strategy", "set_active_strategy", "get_pool_detail", "get_token_info", "get_active_bin", "study_top_lpers"]);
-const SCREENER_TOOLS = new Set(["deploy_position", "get_active_bin", "get_top_candidates", "check_smart_wallets_on_pool", "get_token_holders", "get_token_narrative", "get_token_info", "search_pools", "get_pool_memory", "add_pool_note", "add_to_blacklist", "update_config", "get_wallet_balance", "get_my_positions", "list_strategies", "get_strategy", "set_active_strategy", "swap_token", "add_liquidity", "study_top_lpers", "get_pool_detail"]);
+import { MANAGER_TOOLS, SCREENER_TOOLS } from "./roles.js";
+import { chat } from "../adapters/llm.js";
+import { getWalletBalances } from "../adapters/wallet.js";
+import { getMyPositions } from "../adapters/dlmm.js";
+import { log } from "../core/logger.js";
+import { config } from "../core/config.js";
+import { getStateSummary } from "../core/state.js";
+import { getLessonsForPrompt, getPerformanceSummary } from "../core/lessons.js";
 
 function getToolsForRole(agentType) {
   if (agentType === "MANAGER")  return tools.filter(t => MANAGER_TOOLS.has(t.function.name));
   if (agentType === "SCREENER") return tools.filter(t => SCREENER_TOOLS.has(t.function.name));
   return tools;
 }
-import { getWalletBalances } from "./tools/wallet.js";
-import { getMyPositions } from "./tools/dlmm.js";
-import { log } from "./logger.js";
-import { config } from "./config.js";
-import { getStateSummary } from "./state.js";
-import { getLessonsForPrompt, getPerformanceSummary } from "./lessons.js";
-
-// Supports OpenRouter (default) or any OpenAI-compatible local server (e.g. LM Studio)
-// To use LM Studio: set LLM_BASE_URL=http://localhost:1234/v1 and LLM_API_KEY=lm-studio in .env
-const client = new OpenAI({
-  baseURL: process.env.LLM_BASE_URL || "https://openrouter.ai/api/v1",
-  apiKey: process.env.LLM_API_KEY || process.env.OPENROUTER_API_KEY,
-  timeout: 5 * 60 * 1000,
-});
-
-const DEFAULT_MODEL = process.env.LLM_MODEL || "openrouter/healer-alpha";
 
 /**
  * Core ReAct agent loop.
@@ -44,52 +32,30 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
   const systemPrompt = buildSystemPrompt(agentType, portfolio, positions, stateSummary, lessons, perfSummary);
 
   const messages = [
-    { role: "system", content: systemPrompt },
     ...sessionHistory,          // inject prior conversation turns
     { role: "user", content: goal },
   ];
+
+  const toolsArg = getToolsForRole(agentType);
 
   let emptyStreak = 0;
   for (let step = 0; step < maxSteps; step++) {
     log("agent", `Step ${step + 1}/${maxSteps}`);
 
     try {
-      const activeModel = model || DEFAULT_MODEL;
+      // chat() returns the full message object when tools are provided
+      const msg = await chat({
+        role: agentType,
+        systemPrompt,
+        messages,
+        tools: toolsArg,
+        maxTokens: maxOutputTokens,
+      });
 
-      // Retry up to 3 times on transient provider errors (502, 503, 529)
-      const FALLBACK_MODEL = "stepfun/step-3.5-flash:free";
-      let response;
-      let usedModel = activeModel;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        response = await client.chat.completions.create({
-          model: usedModel,
-          messages,
-          tools: getToolsForRole(agentType),
-          tool_choice: "auto",
-          temperature: config.llm.temperature,
-          max_tokens: maxOutputTokens ?? config.llm.maxTokens,
-        });
-        if (response.choices?.length) break;
-        const errCode = response.error?.code;
-        if (errCode === 502 || errCode === 503 || errCode === 529) {
-          const wait = (attempt + 1) * 5000;
-          if (attempt === 1 && usedModel !== FALLBACK_MODEL) {
-            usedModel = FALLBACK_MODEL;
-            log("agent", `Switching to fallback model ${FALLBACK_MODEL}`);
-          } else {
-            log("agent", `Provider error ${errCode}, retrying in ${wait / 1000}s (attempt ${attempt + 1}/3)`);
-            await new Promise((r) => setTimeout(r, wait));
-          }
-        } else {
-          break;
-        }
+      if (!msg || (!msg.content && !msg.tool_calls)) {
+        log("error", "Bad API response: empty message");
+        throw new Error("API returned empty message");
       }
-
-      if (!response.choices?.length) {
-        log("error", `Bad API response: ${JSON.stringify(response).slice(0, 200)}`);
-        throw new Error(`API returned no choices: ${response.error?.message || JSON.stringify(response)}`);
-      }
-      const msg = response.choices[0].message;
       messages.push(msg);
 
       // If the model didn't call any tools, it's done

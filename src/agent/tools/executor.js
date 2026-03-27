@@ -1,4 +1,4 @@
-import { discoverPools, getPoolDetail, getTopCandidates } from "./screening.js";
+import { discoverPools, getPoolDetail, getTopCandidates } from "../../adapters/screening.js";
 import {
   getActiveBin,
   deployPosition,
@@ -10,27 +10,22 @@ import {
   searchPools,
   withdrawLiquidity,
   addLiquidity,
-} from "./dlmm.js";
-import { getWalletBalances, swapToken } from "./wallet.js";
-import { studyTopLPers } from "./study.js";
-import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, pinLesson, unpinLesson, listLessons } from "../lessons.js";
-import { setPositionInstruction } from "../state.js";
+} from "../../adapters/dlmm.js";
+import { getWalletBalances, swapToken } from "../../adapters/wallet.js";
+import { studyTopLPers } from "../../adapters/study.js";
+import { addLesson, clearAllLessons, clearPerformance, removeLessonsByKeyword, getPerformanceHistory, pinLesson, unpinLesson, listLessons } from "../../core/lessons.js";
+import { setPositionInstruction } from "../../core/state.js";
 
-import { getPoolMemory, addPoolNote } from "../pool-memory.js";
-import { addStrategy, listStrategies, getStrategy, setActiveStrategy, removeStrategy } from "../strategy-library.js";
-import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../token-blacklist.js";
-import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../smart-wallets.js";
-import { getTokenInfo, getTokenHolders, getTokenNarrative } from "./token.js";
-import { config, reloadScreeningThresholds } from "../config.js";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
+import { getPoolMemory, addPoolNote } from "../../core/pool-memory.js";
+import { addStrategy, listStrategies, getStrategy, setActiveStrategy, removeStrategy } from "../../core/strategy-library.js";
+import { addToBlacklist, removeFromBlacklist, listBlacklist } from "../../core/token-blacklist.js";
+import { addSmartWallet, removeSmartWallet, listSmartWallets, checkSmartWalletsOnPool } from "../../adapters/smart-wallets.js";
+import { getTokenInfo, getTokenHolders, getTokenNarrative } from "../../adapters/token.js";
+import { config, readConfig, writeConfig, reloadScreeningThresholds } from "../../core/config.js";
 import { execSync, spawn } from "child_process";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "../user-config.json");
-import { log, logAction } from "../logger.js";
-import { notifyDeploy, notifyClose, notifySwap } from "../telegram.js";
+import { log, logAction } from "../../core/logger.js";
+import { notifyDeploy, notifyClose, notifySwap } from "../../adapters/telegram.js";
+import { WRITE_TOOLS } from "../roles.js";
 
 // Registered by index.js so update_config can restart cron jobs when intervals change
 let _cronRestarter = null;
@@ -144,8 +139,9 @@ const toolMap = {
       minTokenFeesSol: ["screening", "minTokenFeesSol"],
       maxBundlersPct: ["screening", "maxBundlersPct"],
       maxTop10Pct: ["screening", "maxTop10Pct"],
-      minFeePerTvl24h: ["management", "minFeePerTvl24h"],
+      blockedLaunchpads: ["screening", "blockedLaunchpads"],
       // management
+      minFeePerTvl24h: ["management", "minFeePerTvl24h"],
       minClaimAmount: ["management", "minClaimAmount"],
       autoSwapAfterClaim: ["management", "autoSwapAfterClaim"],
       outOfRangeBinsToClose: ["management", "outOfRangeBinsToClose"],
@@ -157,19 +153,26 @@ const toolMap = {
       deployAmountSol: ["management", "deployAmountSol"],
       gasReserve: ["management", "gasReserve"],
       positionSizePct: ["management", "positionSizePct"],
+      strategy: ["management", "strategy"],
+      binsBelow: ["management", "binsBelow"],
       // risk
       maxPositions: ["risk", "maxPositions"],
       maxDeployAmount: ["risk", "maxDeployAmount"],
       // schedule
       managementIntervalMin: ["schedule", "managementIntervalMin"],
       screeningIntervalMin: ["schedule", "screeningIntervalMin"],
-      // models
+      healthCheckIntervalMin: ["schedule", "healthCheckIntervalMin"],
+      // llm
       managementModel: ["llm", "managementModel"],
       screeningModel: ["llm", "screeningModel"],
       generalModel: ["llm", "generalModel"],
-      // strategy
-      minBinStep: ["strategy", "minBinStep"],
-      binsBelow: ["strategy", "binsBelow"],
+      llmBaseURL: ["llm", "llmBaseURL"],
+      llmApiKey: ["llm", "llmApiKey"],
+      llmModel: ["llm", "llmModel"],
+      llmFallbackModel: ["llm", "llmFallbackModel"],
+      temperature: ["llm", "temperature"],
+      maxTokens: ["llm", "maxTokens"],
+      maxSteps: ["llm", "maxSteps"],
     };
 
     const applied = {};
@@ -200,13 +203,14 @@ const toolMap = {
     }
 
     // Persist to user-config.json
-    let userConfig = {};
-    if (fs.existsSync(USER_CONFIG_PATH)) {
-      try { userConfig = JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8")); } catch { /**/ }
+    const userConfig = readConfig();
+    for (const [key, val] of Object.entries(applied)) {
+      const [section, field] = CONFIG_MAP[key];
+      userConfig[section] = userConfig[section] || {};
+      userConfig[section][field] = val;
     }
-    Object.assign(userConfig, applied);
     userConfig._lastAgentTune = new Date().toISOString();
-    fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(userConfig, null, 2));
+    writeConfig(userConfig);
 
     // Restart cron jobs if intervals changed
     const intervalChanged = applied.managementIntervalMin != null || applied.screeningIntervalMin != null;
@@ -230,16 +234,6 @@ const toolMap = {
     return { success: true, applied, unknown, reason };
   },
 };
-
-// Tools that modify on-chain state (need extra safety checks)
-const WRITE_TOOLS = new Set([
-  "deploy_position",
-  "claim_fees",
-  "close_position",
-  "swap_token",
-  "withdraw_liquidity",
-  "add_liquidity",
-]);
 
 /**
  * Execute a tool call with safety checks and logging.

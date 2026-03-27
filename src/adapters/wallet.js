@@ -6,21 +6,21 @@ import {
   Keypair,
 } from "@solana/web3.js";
 import bs58 from "bs58";
-import { log } from "../logger.js";
-import { config } from "../config.js";
+import { log } from "../core/logger.js";
+import { config } from "../core/config.js";
 
 let _connection = null;
 let _wallet = null;
 
 function getConnection() {
-  if (!_connection) _connection = new Connection(process.env.RPC_URL, "confirmed");
+  if (!_connection) _connection = new Connection(config.credentials.rpcUrl, "confirmed");
   return _connection;
 }
 
 function getWallet() {
   if (!_wallet) {
-    if (!process.env.WALLET_PRIVATE_KEY) throw new Error("WALLET_PRIVATE_KEY not set");
-    _wallet = Keypair.fromSecretKey(bs58.decode(process.env.WALLET_PRIVATE_KEY));
+    if (!config.credentials.walletKey) throw new Error("walletKey not set in user-config.json");
+    _wallet = Keypair.fromSecretKey(bs58.decode(config.credentials.walletKey));
   }
   return _wallet;
 }
@@ -42,7 +42,7 @@ export async function getWalletBalances() {
     return { wallet: null, sol: 0, sol_price: 0, sol_usd: 0, usdc: 0, tokens: [], total_usd: 0, error: "Wallet not configured" };
   }
 
-  const HELIUS_KEY = process.env.HELIUS_API_KEY;
+  const HELIUS_KEY = config.credentials.heliusApiKey;
   if (!HELIUS_KEY) {
     log("wallet_error", "HELIUS_API_KEY not set in .env");
     return { wallet: walletAddress, sol: 0, sol_price: 0, sol_usd: 0, usdc: 0, tokens: [], total_usd: 0, error: "Helius API key missing" };
@@ -128,7 +128,7 @@ export async function swapToken({
   input_mint  = normalizeMint(input_mint);
   output_mint = normalizeMint(output_mint);
 
-  if (process.env.DRY_RUN === "true") {
+  if (config.runtime.dryRun) {
     return {
       dry_run: true,
       would_swap: { input_mint, output_mint, amount },

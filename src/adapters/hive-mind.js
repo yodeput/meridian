@@ -23,11 +23,11 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { readConfig, writeConfig } from "../core/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const USER_CONFIG_PATH = path.join(__dirname, "user-config.json");
-const LESSONS_FILE = path.join(__dirname, "lessons.json");
-const POOL_MEMORY_FILE = path.join(__dirname, "pool-memory.json");
+const LESSONS_FILE = path.join(__dirname, "..", "data", "lessons.json");
+const POOL_MEMORY_FILE = path.join(__dirname, "..", "data", "pool-memory.json");
 
 const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
 const GET_TIMEOUT_MS = 5_000;
@@ -38,20 +38,6 @@ const MAX_CONSENSUS_CHARS = 500;
 let _lastSyncTime = 0;
 
 // ─── Helpers ────────────────────────────────────────────────────
-
-function readConfig() {
-  try {
-    return JSON.parse(fs.readFileSync(USER_CONFIG_PATH, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-function writeConfig(patch) {
-  const current = readConfig();
-  const merged = { ...current, ...patch };
-  fs.writeFileSync(USER_CONFIG_PATH, JSON.stringify(merged, null, 2));
-}
 
 function readJsonFile(filePath) {
   try {
@@ -79,7 +65,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = GET_TIMEOUT_MS) {
  */
 export function isEnabled() {
   const cfg = readConfig();
-  return Boolean(cfg.hiveMindUrl && cfg.hiveMindApiKey);
+  return Boolean(cfg.credentials?.hiveMindUrl && cfg.credentials?.hiveMindApiKey);
 }
 
 /**
@@ -116,7 +102,11 @@ export async function register(url, registrationToken) {
   }
 
   const { agent_id, api_key } = await res.json();
-  writeConfig({ hiveMindUrl: baseUrl, hiveMindApiKey: api_key, hiveMindAgentId: agent_id });
+  cfg.credentials = cfg.credentials || {};
+  cfg.credentials.hiveMindUrl = baseUrl;
+  cfg.credentials.hiveMindApiKey = api_key;
+  cfg.credentials.hiveMindAgentId = agent_id;
+  writeConfig(cfg);
   console.log("[hive]", `Registered! agent_id=${agent_id}`);
   console.log("[hive]", `API key: ${api_key}`);
   console.log("[hive]", `Save this key — it will NOT be shown again.`);
@@ -131,7 +121,7 @@ export async function register(url, registrationToken) {
 export async function syncToHive() {
   try {
     const cfg = readConfig();
-    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return;
+    if (!cfg.credentials?.hiveMindUrl || !cfg.credentials?.hiveMindApiKey) return;
 
     // Debounce
     const now = Date.now();
@@ -158,23 +148,23 @@ export async function syncToHive() {
 
     // Screening thresholds from config
     const thresholds = {
-      minFeeActiveTvlRatio: cfg.minFeeActiveTvlRatio,
-      minTvl: cfg.minTvl,
-      maxTvl: cfg.maxTvl,
-      minOrganic: cfg.minOrganic,
-      minHolders: cfg.minHolders,
-      minBinStep: cfg.minBinStep,
-      maxBinStep: cfg.maxBinStep,
-      minVolume: cfg.minVolume,
-      minMcap: cfg.minMcap,
-      stopLossPct: cfg.stopLossPct ?? cfg.emergencyPriceDropPct,
-      takeProfitFeePct: cfg.takeProfitFeePct,
+      minFeeActiveTvlRatio: cfg.screening?.minFeeActiveTvlRatio,
+      minTvl: cfg.screening?.minTvl,
+      maxTvl: cfg.screening?.maxTvl,
+      minOrganic: cfg.screening?.minOrganic,
+      minHolders: cfg.screening?.minHolders,
+      minBinStep: cfg.screening?.minBinStep,
+      maxBinStep: cfg.screening?.maxBinStep,
+      minVolume: cfg.screening?.minVolume,
+      minMcap: cfg.screening?.minMcap,
+      stopLossPct: cfg.management?.emergencyPriceDropPct,
+      takeProfitFeePct: cfg.management?.takeProfitFeePct,
     };
 
     // Agent stats via dynamic import (avoids circular deps)
     let agentStats = null;
     try {
-      const { getPerformanceSummary } = await import("./lessons.js");
+      const { getPerformanceSummary } = await import("../core/lessons.js");
       agentStats = getPerformanceSummary();
     } catch (e) {
       console.log("[hive]", `Could not load agent stats: ${e.message}`);
@@ -187,12 +177,12 @@ export async function syncToHive() {
     console.log("[hive]", `Syncing ${lessons.length} lessons, ${deploys.length} deploys...`);
 
     const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/sync`,
+      `${cfg.credentials.hiveMindUrl}/api/sync`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${cfg.hiveMindApiKey}`,
+          Authorization: `Bearer ${cfg.credentials.hiveMindApiKey}`,
         },
         body: JSON.stringify(payload),
       },
@@ -220,11 +210,11 @@ export async function syncToHive() {
 export async function queryPoolConsensus(poolAddress) {
   try {
     const cfg = readConfig();
-    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+    if (!cfg.credentials?.hiveMindUrl || !cfg.credentials?.hiveMindApiKey) return null;
 
     const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/consensus/pool/${encodeURIComponent(poolAddress)}`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
+      `${cfg.credentials.hiveMindUrl}/api/consensus/pool/${encodeURIComponent(poolAddress)}`,
+      { headers: { Authorization: `Bearer ${cfg.credentials.hiveMindApiKey}` } },
     );
 
     if (!res.ok) return null;
@@ -242,14 +232,14 @@ export async function queryPoolConsensus(poolAddress) {
 export async function queryLessonConsensus(tags) {
   try {
     const cfg = readConfig();
-    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+    if (!cfg.credentials?.hiveMindUrl || !cfg.credentials?.hiveMindApiKey) return null;
 
     const qs = Array.isArray(tags) && tags.length > 0
       ? `?tags=${encodeURIComponent(tags.join(","))}`
       : "";
     const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/consensus/lessons${qs}`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
+      `${cfg.credentials.hiveMindUrl}/api/consensus/lessons${qs}`,
+      { headers: { Authorization: `Bearer ${cfg.credentials.hiveMindApiKey}` } },
     );
 
     if (!res.ok) return null;
@@ -267,12 +257,12 @@ export async function queryLessonConsensus(tags) {
 export async function queryPatternConsensus(volatility) {
   try {
     const cfg = readConfig();
-    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+    if (!cfg.credentials?.hiveMindUrl || !cfg.credentials?.hiveMindApiKey) return null;
 
     const qs = volatility != null ? `?volatility=${encodeURIComponent(volatility)}` : "";
     const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/consensus/patterns${qs}`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
+      `${cfg.credentials.hiveMindUrl}/api/consensus/patterns${qs}`,
+      { headers: { Authorization: `Bearer ${cfg.credentials.hiveMindApiKey}` } },
     );
 
     if (!res.ok) return null;
@@ -289,11 +279,11 @@ export async function queryPatternConsensus(volatility) {
 export async function queryThresholdConsensus() {
   try {
     const cfg = readConfig();
-    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+    if (!cfg.credentials?.hiveMindUrl || !cfg.credentials?.hiveMindApiKey) return null;
 
     const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/consensus/thresholds`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
+      `${cfg.credentials.hiveMindUrl}/api/consensus/thresholds`,
+      { headers: { Authorization: `Bearer ${cfg.credentials.hiveMindApiKey}` } },
     );
 
     if (!res.ok) return null;
@@ -310,11 +300,11 @@ export async function queryThresholdConsensus() {
 export async function getHivePulse() {
   try {
     const cfg = readConfig();
-    if (!cfg.hiveMindUrl || !cfg.hiveMindApiKey) return null;
+    if (!cfg.credentials?.hiveMindUrl || !cfg.credentials?.hiveMindApiKey) return null;
 
     const res = await fetchWithTimeout(
-      `${cfg.hiveMindUrl}/api/pulse`,
-      { headers: { Authorization: `Bearer ${cfg.hiveMindApiKey}` } },
+      `${cfg.credentials.hiveMindUrl}/api/pulse`,
+      { headers: { Authorization: `Bearer ${cfg.credentials.hiveMindApiKey}` } },
     );
 
     if (!res.ok) return null;
