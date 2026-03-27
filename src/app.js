@@ -803,8 +803,8 @@ Focus on: hold duration, entry/exit timing, what win rates look like, whether sc
           console.log(`\nNeed at least 5 closed positions to evolve. ${needed} more needed.\n`);
           return;
         }
-        const fs = await import("fs");
-        const lessonsData = JSON.parse(fs.default.readFileSync("./lessons.json", "utf8"));
+        const { readJson } = await import("./core/data.js");
+        const lessonsData = readJson("lessons.json") || { performance: [] };
         const result = evolveThresholds(lessonsData.performance, config);
         if (!result || Object.keys(result.changes).length === 0) {
           console.log("\nNo threshold changes needed — current settings already match performance data.\n");

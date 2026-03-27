@@ -53,17 +53,26 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       });
 
       if (!msg || (!msg.content && !msg.tool_calls)) {
-        log("error", "Bad API response: empty message");
-        throw new Error("API returned empty message");
+        emptyStreak++;
+        if (emptyStreak >= 3) {
+          log("error", `Bad API response: ${emptyStreak} consecutive empty messages, aborting`);
+          throw new Error("API returned empty message");
+        }
+        log("agent", `Empty API response (streak ${emptyStreak}/3), retrying...`);
+        continue;
       }
       messages.push(msg);
 
       // If the model didn't call any tools, it's done
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
-        // Hermes sometimes returns null content — pop the empty message and retry once
         if (!msg.content) {
-          messages.pop(); // remove the empty assistant message
-          log("agent", "Empty response, retrying...");
+          emptyStreak++;
+          if (emptyStreak >= 3) {
+            log("error", `Empty content: ${emptyStreak} consecutive empty responses, aborting`);
+            throw new Error("API returned empty message");
+          }
+          messages.pop();
+          log("agent", `Empty response (streak ${emptyStreak}/3), retrying...`);
           continue;
         }
         log("agent", "Final answer reached");
@@ -72,6 +81,7 @@ export async function agentLoop(goal, maxSteps = config.llm.maxSteps, sessionHis
       }
 
       // Execute each tool call in parallel
+      emptyStreak = 0;
       const toolResults = await Promise.all(msg.tool_calls.map(async (toolCall) => {
         const functionName = toolCall.function.name;
         let functionArgs;

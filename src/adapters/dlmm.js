@@ -46,6 +46,9 @@ let _wallet = null;
 function getConnection() {
   if (!_connection) {
     _connection = new Connection(config.credentials.rpcUrl, "confirmed");
+    // Disable WebSocket — we only use HTTP methods, prevents WS 429 spam from RPC
+    _connection._rpcWsEndpoint = "";
+    _connection._ws = null;
   }
   return _connection;
 }
